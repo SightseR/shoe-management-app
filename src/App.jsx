@@ -10,29 +10,24 @@ import {
   deleteDoc,
   doc,
   query,
-  orderBy,
 } from 'firebase/firestore';
 
 import ShoeForm from './components/ShoeForm';
 import ShoeTable from './components/ShoeTable';
 import Modal from './components/Modal';
 
-// Global variables provided by the Canvas environment for Firebase setup
-// These are mandatory and should NOT be prompted from the user.
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-// IMPORTANT: For local development, replace this with your actual Firebase config from the Firebase Console.
-// When deployed to Canvas, __firebase_config will be provided automatically.
 const firebaseConfig = typeof __firebase_config !== 'undefined'
   ? JSON.parse(__firebase_config)
   : {
-      apiKey: "AIzaSyBZGYMOE9H0BKJE7Kkb2Ie_FgWjIzkpncg", 
-      authDomain: "shoe-management-app.firebaseapp.com", 
-      projectId: "shoe-management-app", 
-      storageBucket: "shoe-management-app.firebasestorage.app", 
-      messagingSenderId: "Y93634111907", 
+      apiKey: "AIzaSyBZGYMOE9H0BKJE7Kkb2Ie_FgWjIzkpncg",
+      authDomain: "shoe-management-app.firebaseapp.com",
+      projectId: "shoe-management-app",
+      storageBucket: "shoe-management-app.firebasestorage.app",
+      messagingSenderId: "Y93634111907",
       appId: "1:93634111907:web:4bfc0692b841f1bd221216",
-      measurementId: "G-GPS6H47Y6B" 
+      measurementId: "G-GPS6H47Y6B"
     };
 
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
@@ -46,29 +41,30 @@ function App() {
   const [error, setError] = useState('');
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [currentShoe, setCurrentShoe] = useState(null); 
+  const [currentShoe, setCurrentShoe] = useState(null);
+
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortKey, setSortKey] = useState('size');
+  const [sortOrder, setSortOrder] = useState('asc');
 
   useEffect(() => {
     const initializeFirebase = async () => {
       try {
-                const app = initializeApp(firebaseConfig);
+        const app = initializeApp(firebaseConfig);
         const firestoreDb = getFirestore(app);
         const firebaseAuth = getAuth(app);
 
         setDb(firestoreDb);
         setAuth(firebaseAuth);
 
-        
         if (initialAuthToken) {
           await signInWithCustomToken(firebaseAuth, initialAuthToken);
           console.log("Signed in with custom token.");
         } else {
-          
           await signInAnonymously(firebaseAuth);
           console.log("Signed in anonymously.");
         }
 
-        
         onAuthStateChanged(firebaseAuth, (user) => {
           if (user) {
             setUserId(user.uid);
@@ -77,7 +73,7 @@ function App() {
             setUserId(null);
             console.log("User signed out or no user.");
           }
-          setLoading(false); 
+          setLoading(false);
         });
 
       } catch (err) {
@@ -88,24 +84,20 @@ function App() {
     };
 
     initializeFirebase();
-  }, []); 
-  
+  }, []);
+
   useEffect(() => {
-    
     if (db && userId) {
-      
       const shoesCollectionRef = collection(db, `artifacts/${appId}/public/data/shoes`);
       console.log(`Listening to collection: artifacts/${appId}/public/data/shoes`);
 
-      
-      const q = query(shoesCollectionRef); 
+      const q = query(shoesCollectionRef);
 
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const shoesData = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         }));
-                shoesData.sort((a, b) => a.size - b.size);
         setShoes(shoesData);
         setLoading(false);
         console.log("Shoes data updated:", shoesData);
@@ -115,79 +107,101 @@ function App() {
         setLoading(false);
       });
 
-      
       return () => unsubscribe();
     }
-  }, [db, userId, appId]); 
+  }, [db, userId, appId]);
 
-  
+  const handleSearchChange = (e) => {
+    setSearchTerm(e.target.value);
+  };
 
-  /**
-   * Adds a new shoe record to Firestore.
-   * @param {Object} newShoe - The shoe data to add.
-   */
-  const addShoe = async (newShoe) => {
-    if (!db || !userId) {
-      setError("Database not ready. Please wait.");
-      return;
-    }
-    try {
-      const shoesCollectionRef = collection(db, `artifacts/${appId}/public/data/shoes`);
-      await addDoc(shoesCollectionRef, {
-        ...newShoe,
-        createdAt: new Date(), 
-      });
-      console.log("Shoe added successfully:", newShoe);
-      setIsModalOpen(false); 
-    } catch (err) {
-      console.error("Error adding shoe:", err);
-      setError("Failed to add shoe. Please try again.");
+  const handleSort = (key) => {
+    if (sortKey === key) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(key);
+      setSortOrder('asc');
     }
   };
 
-  /**
-   * Updates an existing shoe record in Firestore.
-   * @param {Object} updatedShoe - The updated shoe data, including its ID.
-   */
-  const updateShoe = async (updatedShoe) => {
-    if (!db || !userId) {
-      setError("Database not ready. Please wait.");
-      return;
-    }
-    try {
-      
-      if (!updatedShoe.id) {
-        setError("Cannot update shoe: ID is missing.");
-        return;
+  const filteredAndSortedShoes = React.useMemo(() => {
+    const lowerCaseSearchTerm = searchTerm.toLowerCase();
+    const filtered = shoes.filter(shoe => {
+      return (
+        String(shoe.size).toLowerCase().includes(lowerCaseSearchTerm) ||
+        shoe.season.toLowerCase().includes(lowerCaseSearchTerm) ||
+        (shoe.details && shoe.details.toLowerCase().includes(lowerCaseSearchTerm))
+      );
+    });
+
+    const sorted = [...filtered].sort((a, b) => {
+      let valA, valB;
+
+      if (sortKey === 'size') {
+        valA = a.size;
+        valB = b.size;
+      } else if (sortKey === 'season') {
+        valA = a.season.toLowerCase();
+        valB = b.season.toLowerCase();
+      } else if (sortKey === 'details') {
+        valA = (a.details || '').toLowerCase();
+        valB = (b.details || '').toLowerCase();
+      } else {
+        return 0;
       }
-      const shoeDocRef = doc(db, `artifacts/${appId}/public/data/shoes`, updatedShoe.id);
-      
-      const { id, ...dataToUpdate } = updatedShoe;
-      await updateDoc(shoeDocRef, dataToUpdate);
-      console.log("Shoe updated successfully:", updatedShoe);
-      setIsModalOpen(false); 
-      setCurrentShoe(null); 
+
+      if (valA < valB) {
+        return sortOrder === 'asc' ? -1 : 1;
+      }
+      if (valA > valB) {
+        return sortOrder === 'asc' ? 1 : -1;
+      }
+      return 0;
+    });
+
+    return sorted;
+  }, [shoes, searchTerm, sortKey, sortOrder]);
+
+  const handleSaveShoe = async (shoeData) => {
+    if (!db || !userId) {
+      setError("Database not ready. Please wait.");
+      return;
+    }
+
+    try {
+      if (currentShoe) {
+        const shoeDocRef = doc(db, `artifacts/${appId}/public/data/shoes`, currentShoe.id);
+        await updateDoc(shoeDocRef, shoeData);
+        console.log("Shoe updated successfully:", shoeData);
+      } else {
+        const shoesCollectionRef = collection(db, `artifacts/${appId}/public/data/shoes`);
+        await addDoc(shoesCollectionRef, {
+          ...shoeData,
+          createdAt: new Date(),
+        });
+        console.log("Shoe added successfully:", shoeData);
+      }
+      setIsModalOpen(false);
+      setCurrentShoe(null);
+      setError('');
     } catch (err) {
-      console.error("Error updating shoe:", err);
-      setError("Failed to update shoe. Please try again.");
+      console.error("Error saving shoe:", err);
+      setError("Failed to save shoe. Please try again.");
     }
   };
 
-  /**
-   * Deletes a shoe record from Firestore.
-   * @param {string} id - The ID of the shoe to delete.
-   */
   const deleteShoe = async (id) => {
     if (!db || !userId) {
       setError("Database not ready. Please wait.");
       return;
     }
-    
+
     if (window.confirm("Are you sure you want to delete this shoe record?")) {
       try {
         const shoeDocRef = doc(db, `artifacts/${appId}/public/data/shoes`, id);
         await deleteDoc(shoeDocRef);
         console.log("Shoe deleted successfully:", id);
+        setError('');
       } catch (err) {
         console.error("Error deleting shoe:", err);
         setError("Failed to delete shoe. Please try again.");
@@ -195,34 +209,22 @@ function App() {
     }
   };
 
-  
   const handleAddClick = () => {
-    setCurrentShoe(null); 
+    setCurrentShoe(null);
     setIsModalOpen(true);
   };
 
   const handleEditClick = (shoe) => {
-    setCurrentShoe(shoe); 
+    setCurrentShoe(shoe);
     setIsModalOpen(true);
   };
 
   const handleCloseModal = () => {
     setIsModalOpen(false);
-    setCurrentShoe(null); 
-    setError(''); 
+    setCurrentShoe(null);
+    setError('');
   };
 
-  const handleSaveShoe = (shoeData) => {
-    if (currentShoe) {
-      
-      updateShoe({ ...shoeData, id: currentShoe.id });
-    } else {
-      
-      addShoe(shoeData);
-    }
-  };
-
-  
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100">
@@ -246,14 +248,42 @@ function App() {
           👟 Shoe Management App
         </h1>
 
-        {/* User ID Display */}
         {userId && (
           <p className="text-sm text-gray-600 text-center mb-4">
             Current User ID: <span className="font-mono bg-gray-100 p-1 rounded">{userId}</span>
           </p>
         )}
 
-        {/* Add New Record Button */}
+        <div className="mb-6">
+          <input
+            type="text"
+            placeholder="Search by size, season, or details..."
+            value={searchTerm}
+            onChange={handleSearchChange}
+            className="w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-3 mb-6 items-center justify-center sm:justify-start">
+          <span className="text-gray-700 font-medium mr-2">Sort by:</span>
+          {['size', 'season', 'details'].map((key) => (
+            <button
+              key={key}
+              onClick={() => handleSort(key)}
+              className={`px-4 py-2 rounded-full text-sm font-semibold transition duration-200 ease-in-out
+                ${sortKey === key
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+            >
+              {key.charAt(0).toUpperCase() + key.slice(1)}{' '}
+              {sortKey === key && (
+                sortOrder === 'asc' ? '▲' : '▼'
+              )}
+            </button>
+          ))}
+        </div>
+
         <div className="flex justify-end mb-6">
           <button
             onClick={handleAddClick}
@@ -277,17 +307,15 @@ function App() {
           </button>
         </div>
 
-        {/* Shoe Table */}
-        <ShoeTable shoes={shoes} onEdit={handleEditClick} onDelete={deleteShoe} />
+        <ShoeTable shoes={filteredAndSortedShoes} onEdit={handleEditClick} onDelete={deleteShoe} />
 
-        {/* Add/Edit Shoe Modal */}
         <Modal
           isOpen={isModalOpen}
           onClose={handleCloseModal}
           title={currentShoe ? 'Edit Shoe Record' : 'Add New Shoe Record'}
         >
           <ShoeForm
-            shoe={currentShoe} 
+            shoe={currentShoe}
             onSave={handleSaveShoe}
             onCancel={handleCloseModal}
           />
