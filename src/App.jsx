@@ -44,8 +44,12 @@ function App() {
   const [currentShoe, setCurrentShoe] = useState(null);
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortKey, setSortKey] = useState('size');
-  const [sortOrder, setSortOrder] = useState('asc');
+  const [sortOption, setSortOption] = useState('size-asc'); // New state for combined sort option
+
+  // New states for filtering
+  const [minSizeFilter, setMinSizeFilter] = useState('');
+  const [maxSizeFilter, setMaxSizeFilter] = useState('');
+  const [selectedSeasons, setSelectedSeasons] = useState([]); // Array to hold selected seasons
 
   useEffect(() => {
     const initializeFirebase = async () => {
@@ -115,18 +119,33 @@ function App() {
     setSearchTerm(e.target.value);
   };
 
-  const handleSort = (key) => {
-    if (sortKey === key) {
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+  const handleSortChange = (e) => {
+    setSortOption(e.target.value);
+  };
+
+  const handleMinSizeChange = (e) => {
+    setMinSizeFilter(e.target.value);
+  };
+
+  const handleMaxSizeChange = (e) => {
+    setMaxSizeFilter(e.target.value);
+  };
+
+  const handleSeasonFilterChange = (e) => {
+    const season = e.target.value;
+    if (e.target.checked) {
+      setSelectedSeasons([...selectedSeasons, season]);
     } else {
-      setSortKey(key);
-      setSortOrder('asc');
+      setSelectedSeasons(selectedSeasons.filter(s => s !== season));
     }
   };
 
   const filteredAndSortedShoes = React.useMemo(() => {
+    let currentShoes = [...shoes];
+
+    // Apply search filter
     const lowerCaseSearchTerm = searchTerm.toLowerCase();
-    const filtered = shoes.filter(shoe => {
+    currentShoes = currentShoes.filter(shoe => {
       return (
         String(shoe.size).toLowerCase().includes(lowerCaseSearchTerm) ||
         shoe.season.toLowerCase().includes(lowerCaseSearchTerm) ||
@@ -134,7 +153,26 @@ function App() {
       );
     });
 
-    const sorted = [...filtered].sort((a, b) => {
+    // Apply size range filter
+    const min = parseFloat(minSizeFilter);
+    const max = parseFloat(maxSizeFilter);
+
+    if (!isNaN(min)) {
+      currentShoes = currentShoes.filter(shoe => shoe.size >= min);
+    }
+    if (!isNaN(max)) {
+      currentShoes = currentShoes.filter(shoe => shoe.size <= max);
+    }
+
+    // Apply season filter
+    if (selectedSeasons.length > 0) {
+      currentShoes = currentShoes.filter(shoe => selectedSeasons.includes(shoe.season));
+    }
+
+    // Apply sorting
+    const [sortKey, sortOrder] = sortOption.split('-');
+
+    const sorted = [...currentShoes].sort((a, b) => {
       let valA, valB;
 
       if (sortKey === 'size') {
@@ -160,7 +198,7 @@ function App() {
     });
 
     return sorted;
-  }, [shoes, searchTerm, sortKey, sortOrder]);
+  }, [shoes, searchTerm, sortOption, minSizeFilter, maxSizeFilter, selectedSeasons]);
 
   const handleSaveShoe = async (shoeData) => {
     if (!db || !userId) {
@@ -225,6 +263,41 @@ function App() {
     setError('');
   };
 
+  const handleSaveShoeForm = (shoeData) => {
+    if (currentShoe) {
+      updateShoe({ ...shoeData, id: currentShoe.id });
+    } else {
+      addShoe(shoeData);
+    }
+  };
+
+  const handleDownloadCSV = () => {
+    const headers = ['Shoe Size', 'Season', 'Image', 'Details'];
+    const csvRows = [];
+
+    csvRows.push(headers.map(header => `"${header}"`).join(','));
+
+    shoes.forEach(shoe => {
+      const row = [
+        shoe.size,
+        shoe.season,
+        shoe.imageUrl || '',
+        `"${(shoe.details || '').replace(/"/g, '""')}"`
+      ];
+      csvRows.push(row.join(','));
+    });
+
+    const csvString = csvRows.join('\n');
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute('download', 'shoe_data.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100">
@@ -264,27 +337,69 @@ function App() {
           />
         </div>
 
-        <div className="flex flex-wrap gap-3 mb-6 items-center justify-center sm:justify-start">
-          <span className="text-gray-700 font-medium mr-2">Sort by:</span>
-          {['size', 'season', 'details'].map((key) => (
-            <button
-              key={key}
-              onClick={() => handleSort(key)}
-              className={`px-4 py-2 rounded-full text-sm font-semibold transition duration-200 ease-in-out
-                ${sortKey === key
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                }`}
+        <div className="flex flex-wrap gap-4 mb-6 items-center justify-center sm:justify-start">
+          {/* Sort Dropdown */}
+          <div className="flex items-center">
+            <label htmlFor="sort-by" className="text-gray-700 font-medium mr-2">Sort by:</label>
+            <select
+              id="sort-by"
+              value={sortOption}
+              onChange={handleSortChange}
+              className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
             >
-              {key.charAt(0).toUpperCase() + key.slice(1)}{' '}
-              {sortKey === key && (
-                sortOrder === 'asc' ? '▲' : '▼'
-              )}
-            </button>
-          ))}
+              <option value="size-asc">Size (↑)</option>
+              <option value="size-desc">Size (↓)</option>
+              <option value="season-asc">Season (↑)</option>
+              <option value="season-desc">Season (↓)</option>
+              <option value="details-asc">Details (↑)</option>
+              <option value="details-desc">Details (↓)</option>
+            </select>
+          </div>
+
+          {/* Size Range Filter */}
+          <div className="flex items-center gap-2">
+            <span className="text-gray-700 font-medium">Size Range:</span>
+            <input
+              type="number"
+              placeholder="Min"
+              value={minSizeFilter}
+              onChange={handleMinSizeChange}
+              className="w-20 px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              min="20"
+              max="50"
+            />
+            <span>-</span>
+            <input
+              type="number"
+              placeholder="Max"
+              value={maxSizeFilter}
+              onChange={handleMaxSizeChange}
+              className="w-20 px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              min="20"
+              max="50"
+            />
+          </div>
+
+          {/* Season Checkbox Filter */}
+          <div className="flex items-center gap-3">
+            <span className="text-gray-700 font-medium">Seasons:</span>
+            {['Summer', 'Autumn/Spring', 'Winter'].map(season => (
+              <label key={season} className="inline-flex items-center">
+                <input
+                  type="checkbox"
+                  value={season}
+                  checked={selectedSeasons.includes(season)}
+                  onChange={handleSeasonFilterChange}
+                  className="form-checkbox h-4 w-4 text-indigo-600 rounded"
+                />
+                <span className="ml-2 text-gray-700 text-sm">{season}</span>
+              </label>
+            ))}
+          </div>
         </div>
 
-        <div className="flex justify-end mb-6">
+        <div className="flex justify-end gap-3 mb-6">
+          
           <button
             onClick={handleAddClick}
             className="flex items-center px-6 py-3 bg-indigo-600 text-white font-semibold rounded-full shadow-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-300 ease-in-out transform hover:scale-105"
@@ -305,6 +420,26 @@ function App() {
             </svg>
             Add New Shoe
           </button>
+          <button
+            onClick={handleDownloadCSV}
+            className="flex items-center px-6 py-3 bg-green-600 text-white font-semibold rounded-full shadow-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-300 ease-in-out transform hover:scale-105"
+          >
+            <svg
+              className="w-5 h-5 mr-2"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+              ></path>
+            </svg>
+            CSV
+          </button>
         </div>
 
         <ShoeTable shoes={filteredAndSortedShoes} onEdit={handleEditClick} onDelete={deleteShoe} />
@@ -316,7 +451,7 @@ function App() {
         >
           <ShoeForm
             shoe={currentShoe}
-            onSave={handleSaveShoe}
+            onSave={handleSaveShoeForm}
             onCancel={handleCloseModal}
           />
         </Modal>
